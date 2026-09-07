@@ -53,6 +53,30 @@ success having run nothing. As the sole required check, that turns a cancelled r
 into a green merge authorisation. The correction refuses to run on cancellation and
 asserts the `changes` job actually succeeded before trusting its output.
 
+## Found by running it, not by reading it
+
+**A release created with the default token does not trigger `release:` workflows.**
+GitHub suppresses that to prevent recursive runs. Proven here: three releases
+published, zero deploy runs. A pipeline that automates release creation *and*
+deploys on the release event will silently stop deploying — no error, no failed
+run, simply nothing. The fix in this repo is to call the deploy through
+`workflow_call` instead of depending on the event. A token from a GitHub App or a
+PAT would also work, at the cost of managing a credential.
+
+**Skipping the back-merge loses the fix, immediately.** The first pass through this
+lab cut `v0.1.0`, fixed a defect on the release branch during the soak, shipped it —
+and then cut `v0.2.0` from trunk, which never received the fix. The ancestry report
+caught it as a non-ancestor transition, and `git show v0.2.0:app/config.py` confirms
+the fix is absent. One release, one regression. After back-merging with a true merge
+commit, the next transition is an ancestor relation again.
+
+**Nothing blocks a red pull request.** PR 1 reports `mergeable=MERGEABLE,
+mergeStateStatus=UNSTABLE` — failing checks, merge permitted — because no required
+check exists. Installing one needs GitHub Pro on a private repository; both the
+rulesets API and classic branch protection return
+`403 Upgrade to GitHub Pro or make this repository public`. That is the only
+demonstration in this repo that cannot currently be run.
+
 ## The release train
 
 ```
