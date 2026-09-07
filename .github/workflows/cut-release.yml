@@ -36,8 +36,10 @@ jobs:
           BRANCH="release/v${{ inputs.version }}"
           if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
             echo "Reusing existing $BRANCH"
-            git fetch origin "$BRANCH"
-            git switch "$BRANCH"
+            # Explicit refspec: actions/checkout only configures one for the ref it
+            # checked out, so origin/$BRANCH does not otherwise exist locally.
+            git fetch origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+            git switch -c "$BRANCH" --track "origin/$BRANCH"
           else
             echo "Cutting $BRANCH from main"
             git switch -c "$BRANCH"
