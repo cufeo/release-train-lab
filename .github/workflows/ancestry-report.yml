@@ -1,0 +1,64 @@
+# The audit that found four non-ancestor transitions in the real repository.
+# Run it here and it should report zero, because the promote step makes the
+# release tag the candidate's own commit.
+name: Ancestry report
+
+on:
+  workflow_dispatch:
+  release:
+    types: [released]
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check every consecutive tag transition
+        run: |
+          git fetch origin --tags --force
+
+          # Ordered by tag creation date. Only valid because these are annotated
+          # tags — lightweight tags carry no date and sort by commit date instead,
+          # which silently produces the wrong release order.
+          mapfile -t TAGS < <(git for-each-ref --sort=creatordate --format='%(refname:short)' 'refs/tags/v*')
+
+          if [ "${#TAGS[@]}" -lt 2 ]; then
+            echo "Need at least two tags to report on transitions."
+            exit 0
+          fi
+
+          {
+            echo "### Tag transitions"
+            echo ""
+            echo "| from | to | ancestor? |"
+            echo "|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          BREAKS=0
+          for ((i = 1; i < ${#TAGS[@]}; i++)); do
+            FROM="${TAGS[i-1]}"; TO="${TAGS[i]}"
+            if git merge-base --is-ancestor "$FROM" "$TO"; then
+              MARK="yes"
+            else
+              MARK="**NO**"; BREAKS=$((BREAKS + 1))
+            fi
+            echo "| \`$FROM\` | \`$TO\` | $MARK |" >> "$GITHUB_STEP_SUMMARY"
+            printf '%-22s -> %-22s %s\n' "$FROM" "$TO" "$MARK"
+          done
+
+          TOTAL=$(( ${#TAGS[@]} - 1 ))
+          {
+            echo ""
+            echo "**$BREAKS of $TOTAL transitions are not ancestor relations.**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "$BREAKS of $TOTAL transitions are not ancestor relations."
+          if [ "$BREAKS" -ne 0 ]; then
+            echo "::warning::A release does not descend from the release before it."
+          fi

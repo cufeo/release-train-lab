@@ -1,0 +1,96 @@
+# Promote a candidate to a release.
+#
+# This is the whole point. The release tag is minted at the candidate's commit by
+# `git rev-parse`, so "the commit we validated is the commit we ship" stops being a
+# rule someone has to remember and becomes something the pipeline cannot get wrong.
+name: Promote release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version without the leading v, e.g. 0.1.0"
+        required: true
+      rc:
+        description: "The candidate to promote"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name  "release-bot"
+          git config user.email "release-bot@users.noreply.github.com"
+
+      - name: Resolve the candidate commit
+        id: resolve
+        run: |
+          RC_TAG="v${{ inputs.version }}-rc${{ inputs.rc }}"
+          git fetch origin --tags --force
+          RC_SHA="$(git rev-parse "${RC_TAG}^{commit}")"
+          echo "rc_tag=$RC_TAG" >> "$GITHUB_OUTPUT"
+          echo "rc_sha=$RC_SHA" >> "$GITHUB_OUTPUT"
+          echo "Candidate $RC_TAG resolves to $RC_SHA"
+
+      - name: Tag the release at that exact commit
+        id: tag
+        run: |
+          TAG="v${{ inputs.version }}"
+          git tag -a "$TAG" -m "Release $TAG (promoted from ${{ steps.resolve.outputs.rc_tag }})" \
+            "${{ steps.resolve.outputs.rc_sha }}"
+          git push origin "$TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Prove what shipped is what soaked
+        id: proof
+        run: |
+          RC_SHA="${{ steps.resolve.outputs.rc_sha }}"
+          REL_SHA="$(git rev-parse "${{ steps.tag.outputs.tag }}^{commit}")"
+
+          echo "candidate : $RC_SHA"
+          echo "release   : $REL_SHA"
+
+          if [ "$RC_SHA" != "$REL_SHA" ]; then
+            echo "::error::release tag does not point at the candidate commit"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "${{ steps.resolve.outputs.rc_tag }}" "${{ steps.tag.outputs.tag }}"; then
+            echo "::error::candidate is not an ancestor of the release"
+            exit 1
+          fi
+          echo "sha=$REL_SHA" >> "$GITHUB_OUTPUT"
+          echo "Identical commit, ancestry holds."
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.tag.outputs.tag }}" \
+            --latest \
+            --verify-tag \
+            --title "${{ steps.tag.outputs.tag }}" \
+            --notes "Promoted from \`${{ steps.resolve.outputs.rc_tag }}\` at \`${{ steps.proof.outputs.sha }}\`. The released commit is byte-identical to the soaked candidate."
+
+      - name: Summary
+        run: |
+          {
+            echo "### Promoted"
+            echo ""
+            echo "| field | value |"
+            echo "|---|---|"
+            echo "| candidate | \`${{ steps.resolve.outputs.rc_tag }}\` |"
+            echo "| release | \`${{ steps.tag.outputs.tag }}\` |"
+            echo "| shared commit | \`${{ steps.proof.outputs.sha }}\` |"
+            echo "| ancestry | asserted in-pipeline |"
+            echo ""
+            echo "The assertion is a build step, not a runbook instruction."
+          } >> "$GITHUB_STEP_SUMMARY"

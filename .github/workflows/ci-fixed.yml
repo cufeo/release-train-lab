@@ -1,0 +1,93 @@
+# The same pipeline with the three defects corrected. `fixed-gate` is the only
+# check name a ruleset should require.
+name: CI (corrected)
+
+on:
+  pull_request:
+    branches: [main, "release/v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    name: changes (corrected)
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Simulate a changes-job failure
+        if: contains(github.event.pull_request.title, '[break-changes]')
+        run: |
+          echo "::error::changes job failed (simulated)"
+          exit 1
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          # FIX 1. The exclusion lives inside a single extglob pattern, so it stays
+          # one predicate instead of becoming an independent "anything but" match.
+          # `app/*` is required as well, or top-level files are missed.
+          # FIX 1b. Both extensions spelled out, because picomatch `?` is not optional.
+          filters: |
+            backend:
+              - 'app/!(vendor)/**'
+              - 'app/*'
+              - 'manage.py'
+              - '.github/workflows/ci-*.yml'
+              - '.github/workflows/ci-*.yaml'
+
+  smoke:
+    name: smoke (corrected)
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Prepare env file the way the build helper does
+        run: cp .env.example .env
+      - name: Check the runtime image settings
+        # FIX 2. Supply the packed-secrets placeholder, and load the build settings
+        # that already exist for exactly this purpose. The whole import chain still
+        # runs, so the check keeps its reason to exist.
+        run: |
+          set -a; . ./.env; set +a
+          export SECRETS='{}'
+          export APP_BUILD_OVERRIDES=1
+          for mod in development staging production; do
+            echo "--- app.settings.$mod (build overrides applied) ---"
+            APP_SETTINGS="app.settings.$mod" python manage.py check
+          done
+
+  fixed-gate:
+    name: fixed-gate
+    needs: [changes, smoke]
+    # FIX 3a. Do not run on cancellation. A cancelled run must leave the required
+    # check unreported (merge stays blocked) rather than reporting success.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Aggregate
+        run: |
+          # FIX 3b. Assert the changes job actually succeeded before trusting its
+          # output. An empty output must never be read as "nothing to do".
+          if [ "${{ needs.changes.result }}" != "success" ]; then
+            echo "::error::changes job did not succeed (${{ needs.changes.result }}) — failing closed"
+            exit 1
+          fi
+          if [ "${{ needs.changes.outputs.backend }}" != "true" ]; then
+            echo "No backend paths changed — nothing to gate."
+            exit 0
+          fi
+          for r in "${{ needs.smoke.result }}"; do
+            case "$r" in
+              success) ;;
+              *) echo "::error::a required job reported $r"; exit 1 ;;
+            esac
+          done
+          echo "All gated jobs passed."

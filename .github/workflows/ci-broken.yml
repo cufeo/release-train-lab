@@ -1,0 +1,86 @@
+# The change exactly as originally proposed. Kept so the two gates can be compared
+# side by side on one pull request. Do not copy this file into a real repository.
+name: CI (as proposed)
+
+on:
+  pull_request:
+    branches: [main, "release/v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    name: changes (proposed)
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Deterministic stand-in for the ways this job really fails: a checkout error,
+      # the files API rate-limiting, or the 3000-file cap on a large pull request.
+      - name: Simulate a changes-job failure
+        if: contains(github.event.pull_request.title, '[break-changes]')
+        run: |
+          echo "::error::changes job failed (simulated)"
+          exit 1
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          # DEFECT 1. The default predicate-quantifier is `some`, and each list item
+          # compiles to its own picomatch predicate. A leading `!` therefore matches
+          # every path that is NOT app/vendor — so this fires on README.md too.
+          # DEFECT 1b. `ya?ml` matches neither `yaml` nor `yml`; picomatch `?` is
+          # exactly one character, so it only matches `yaXml`.
+          filters: |
+            backend:
+              - 'app/**'
+              - '!app/vendor/**'
+              - '.github/workflows/ci-*.ya?ml'
+
+  smoke:
+    name: smoke (proposed)
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Prepare env file the way the build helper does
+        run: cp .env.example .env
+      - name: Check the runtime image settings
+        # DEFECT 2. SECRETS is absent from .env.example, so this dies at package
+        # import with JSONDecodeError before any settings module is reached.
+        run: |
+          set -a; . ./.env; set +a
+          for mod in development staging production; do
+            echo "--- app.settings.$mod ---"
+            APP_SETTINGS="app.settings.$mod" python manage.py check
+          done
+
+  broken-gate:
+    name: broken-gate
+    needs: [changes, smoke]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Aggregate
+        run: |
+          # DEFECT 3. `always()` runs this even when the workflow was cancelled or
+          # when `changes` failed. In both cases the output below interpolates to an
+          # empty string, takes the early-out, and reports success having gated nothing.
+          if [ "${{ needs.changes.outputs.backend }}" != "true" ]; then
+            echo "No backend paths changed — nothing to gate."
+            exit 0
+          fi
+          for r in "${{ needs.smoke.result }}"; do
+            case "$r" in
+              success|skipped) ;;
+              *) echo "::error::a required job reported $r"; exit 1 ;;
+            esac
+          done
+          echo "All gated jobs passed."

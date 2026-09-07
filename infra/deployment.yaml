@@ -1,0 +1,9 @@
+# Stands in for the environment overlay that ships inside the release tag.
+# Editing this file between two releases is what makes a rollback revert
+# infrastructure as well as application code.
+resources:
+  cpu: "1100m"
+  memory: "1500Mi"
+workers: 2
+topologyKey: kubernetes.io/hostname
+volumes: []

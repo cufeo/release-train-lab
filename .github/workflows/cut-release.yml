@@ -1,0 +1,80 @@
+# Cut a release train: branch from main, tag a candidate, publish a prerelease.
+# Ported from the pattern already in use for other components.
+name: Cut release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version without the leading v, e.g. 0.1.0"
+        required: true
+      rc:
+        description: "Candidate number"
+        required: true
+        default: "1"
+
+permissions:
+  contents: write
+
+jobs:
+  cut:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name  "release-bot"
+          git config user.email "release-bot@users.noreply.github.com"
+
+      - name: Create or reuse the release branch
+        id: branch
+        run: |
+          BRANCH="release/v${{ inputs.version }}"
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            echo "Reusing existing $BRANCH"
+            git fetch origin "$BRANCH"
+            git switch "$BRANCH"
+          else
+            echo "Cutting $BRANCH from main"
+            git switch -c "$BRANCH"
+            git push origin "$BRANCH"
+          fi
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Tag the candidate
+        id: tag
+        run: |
+          TAG="v${{ inputs.version }}-rc${{ inputs.rc }}"
+          # Annotated, not lightweight. A lightweight tag is a mutable pointer with
+          # no author and no date, which makes a release unauditable.
+          git tag -a "$TAG" -m "Release candidate $TAG"
+          git push origin "$TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.tag.outputs.tag }}" \
+            --prerelease \
+            --verify-tag \
+            --title "${{ steps.tag.outputs.tag }}" \
+            --notes "Candidate cut from \`${{ steps.branch.outputs.branch }}\` at \`${{ steps.branch.outputs.sha }}\`."
+
+      - name: Summary
+        run: |
+          {
+            echo "### Candidate cut"
+            echo ""
+            echo "| field | value |"
+            echo "|---|---|"
+            echo "| branch | \`${{ steps.branch.outputs.branch }}\` |"
+            echo "| tag | \`${{ steps.tag.outputs.tag }}\` |"
+            echo "| commit | \`${{ steps.branch.outputs.sha }}\` |"
+            echo "| tag type | annotated |"
+          } >> "$GITHUB_STEP_SUMMARY"

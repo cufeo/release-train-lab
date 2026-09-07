@@ -1,0 +1,69 @@
+# Deploy, reduced to its structure. No cluster is contacted — what matters for the
+# decision is which ref the deploy resolves and what it would apply from that ref.
+name: Deploy
+
+on:
+  release:
+    types: [prereleased, released]
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      # No `ref:` here, deliberately. This mirrors the real pipeline: the checkout
+      # resolves github.ref, which for a release event is the tag. That is why the
+      # deployed ref carries the environment's desired infrastructure state as well
+      # as the application version.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve what is being deployed
+        id: what
+        run: |
+          ENVIRONMENT=production
+          if [ "${{ github.event.action }}" = "prereleased" ]; then
+            ENVIRONMENT=staging
+          fi
+          TAG="${{ github.event.release.tag_name }}"
+          SHA="$(git rev-parse "${TAG}^{commit}")"
+          echo "environment=$ENVIRONMENT" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG"                 >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA"                 >> "$GITHUB_OUTPUT"
+
+      - name: Show the infrastructure a rollback would carry with it
+        run: |
+          TAG="${{ steps.what.outputs.tag }}"
+          PREV="$(git tag -l 'v*' --sort=-v:refname | grep -v -- '-rc' | grep -v "^${TAG}$" | head -n1 || true)"
+          if [ -z "$PREV" ]; then
+            echo "No earlier release to compare against yet."
+            exit 0
+          fi
+          echo "Comparing infrastructure between $PREV and $TAG:"
+          if git diff --quiet "$PREV" "$TAG" -- infra/; then
+            echo "  no infrastructure change"
+          else
+            git diff --stat "$PREV" "$TAG" -- infra/
+            echo ""
+            echo "::warning::Redeploying $PREV would revert the above infrastructure, not just the application version."
+          fi
+
+      - name: Apply
+        run: |
+          echo "would apply: image=${{ steps.what.outputs.tag }} -> ${{ steps.what.outputs.environment }}"
+          echo "would apply: the whole infra/ tree at ${{ steps.what.outputs.sha }}"
+
+      - name: Summary
+        run: |
+          {
+            echo "### Deployed to ${{ steps.what.outputs.environment }}"
+            echo ""
+            echo "| field | value |"
+            echo "|---|---|"
+            echo "| tag | \`${{ steps.what.outputs.tag }}\` |"
+            echo "| commit | \`${{ steps.what.outputs.sha }}\` |"
+            echo "| applied from | the deployed ref, image and infrastructure together |"
+          } >> "$GITHUB_STEP_SUMMARY"
