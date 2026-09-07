@@ -39,6 +39,13 @@ then a cache connection in a ready hook, then a credentials lookup in the databa
 engine. The correction supplies a placeholder and applies overrides that already
 existed for this exact purpose, while still executing the whole import chain.
 
+One detail deliberately *not* reproduced: the real example env file carries a stray
+unmatched quote on a base64 line. `docker run --env-file` tolerates it, because it
+does no shell parsing — but this lab loads the file with `source`, which aborts on
+it. Keeping it made the smoke job fail for the wrong reason and would have made the
+demonstration dishonest, so the quote is removed here. It is harmless in the real
+pipeline for the same reason: nothing shell-sources that file.
+
 **The gate fails open.** `if: always()` runs the aggregator even when the run was
 cancelled or the `changes` job failed. In both cases its output interpolates to an
 empty string, which is not `"true"`, so the gate takes its early-out and reports
@@ -64,3 +71,4 @@ Tags are annotated throughout. A lightweight tag is a mutable pointer with no au
 and no date; it can be deleted and recreated on different code leaving no trace, and
 it sorts by commit date rather than tag date, which silently produces the wrong
 release order in any audit.
+
