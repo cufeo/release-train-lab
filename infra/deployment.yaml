@@ -1,9 +1,8 @@
-# Stands in for the environment overlay that ships inside the release tag.
-# Editing this file between two releases is what makes a rollback revert
-# infrastructure as well as application code.
 resources:
-  cpu: "1100m"
-  memory: "1500Mi"
-workers: 2
-topologyKey: kubernetes.io/hostname
-volumes: []
+  cpu: "2000m"
+  memory: "2700Mi"
+workers: 4
+topologyKey: topology.kubernetes.io/zone
+volumes:
+  - name: partner-ca-certs
+    mountPath: /etc/ssl/certs/partner.crt
