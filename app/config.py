@@ -56,3 +56,5 @@ def check_credentials_present():
             "request is invalid (resolving database credentials)"
         )
     return True
+
+STABILISATION_FIX = "found during rc1 soak"
