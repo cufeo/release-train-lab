@@ -21,6 +21,8 @@ permissions:
 jobs:
   promote:
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.out.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -80,6 +82,10 @@ jobs:
             --title "${{ steps.tag.outputs.tag }}" \
             --notes "Promoted from \`${{ steps.resolve.outputs.rc_tag }}\` at \`${{ steps.proof.outputs.sha }}\`. The released commit is byte-identical to the soaked candidate."
 
+      - name: Record the promoted tag
+        id: out
+        run: echo "tag=${{ steps.tag.outputs.tag }}" >> "$GITHUB_OUTPUT"
+
       - name: Summary
         run: |
           {
@@ -94,3 +100,12 @@ jobs:
             echo ""
             echo "The assertion is a build step, not a runbook instruction."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # Called directly rather than left to the `release: released` event, which a
+  # release created with the default token never fires.
+  deploy:
+    needs: promote
+    uses: ./.github/workflows/deploy-stub.yml
+    with:
+      tag: ${{ needs.promote.outputs.tag }}
+      environment: production

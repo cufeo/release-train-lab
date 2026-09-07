@@ -1,10 +1,24 @@
 # Deploy, reduced to its structure. No cluster is contacted — what matters for the
 # decision is which ref the deploy resolves and what it would apply from that ref.
+#
+# Two entry points, and the second one exists because of a real trap:
+# a release created with the default GITHUB_TOKEN does NOT trigger `release:`
+# workflows. GitHub suppresses that to prevent recursive runs. So a pipeline that
+# automates release creation and deploys on the release event will silently stop
+# deploying. The `workflow_call` entry point removes the dependency on the event.
 name: Deploy
 
 on:
   release:
     types: [prereleased, released]
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+      environment:
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -24,15 +38,24 @@ jobs:
       - name: Resolve what is being deployed
         id: what
         run: |
-          ENVIRONMENT=production
-          if [ "${{ github.event.action }}" = "prereleased" ]; then
-            ENVIRONMENT=staging
+          if [ -n "${{ inputs.tag }}" ]; then
+            TAG="${{ inputs.tag }}"
+            ENVIRONMENT="${{ inputs.environment }}"
+            ENTRY="workflow_call"
+          else
+            TAG="${{ github.event.release.tag_name }}"
+            ENVIRONMENT=production
+            if [ "${{ github.event.action }}" = "prereleased" ]; then
+              ENVIRONMENT=staging
+            fi
+            ENTRY="release event"
           fi
-          TAG="${{ github.event.release.tag_name }}"
+          git fetch origin --tags --force
           SHA="$(git rev-parse "${TAG}^{commit}")"
           echo "environment=$ENVIRONMENT" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG"                 >> "$GITHUB_OUTPUT"
           echo "sha=$SHA"                 >> "$GITHUB_OUTPUT"
+          echo "entry=$ENTRY"             >> "$GITHUB_OUTPUT"
 
       - name: Show the infrastructure a rollback would carry with it
         run: |
@@ -65,5 +88,6 @@ jobs:
             echo "|---|---|"
             echo "| tag | \`${{ steps.what.outputs.tag }}\` |"
             echo "| commit | \`${{ steps.what.outputs.sha }}\` |"
+            echo "| triggered via | ${{ steps.what.outputs.entry }} |"
             echo "| applied from | the deployed ref, image and infrastructure together |"
           } >> "$GITHUB_STEP_SUMMARY"

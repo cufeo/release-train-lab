@@ -19,6 +19,8 @@ permissions:
 jobs:
   cut:
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -80,3 +82,12 @@ jobs:
             echo "| commit | \`${{ steps.branch.outputs.sha }}\` |"
             echo "| tag type | annotated |"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # Called directly rather than left to the `release: prereleased` event, which a
+  # prerelease created with the default token never fires.
+  deploy:
+    needs: cut
+    uses: ./.github/workflows/deploy-stub.yml
+    with:
+      tag: ${{ needs.cut.outputs.tag }}
+      environment: staging
