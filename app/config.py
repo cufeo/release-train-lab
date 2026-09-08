@@ -58,3 +58,5 @@ def check_credentials_present():
     return True
 
 STABILISATION_FIX = "found during rc1 soak"
+
+HOTFIX_MARKER = True
