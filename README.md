@@ -77,6 +77,30 @@ rulesets API and classic branch protection return
 `403 Upgrade to GitHub Pro or make this repository public`. That is the only
 demonstration in this repo that cannot currently be run.
 
+## The fail-open gate, as a merge authorisation
+
+A ruleset on `main` requires exactly one check. With everything else held constant —
+same pull request, same code, same check results — swapping which gate is required
+changes whether the merge is allowed:
+
+| Required check | PR "application change [break-changes]" |
+|---|---|
+| `fixed-gate` | `mergeStateStatus=BLOCKED` |
+| `broken-gate` | `mergeStateStatus=UNSTABLE` — merge permitted |
+
+On that pull request the `changes` job failed and no application job ran at all.
+`broken-gate` reported success anyway, and as the required check it turned that into
+permission to merge. This is the difference between a gate that fails closed and one
+that fails open, expressed as the only thing that matters: whether the button works.
+
+## A conflicted pull request gets no checks at all
+
+Not a defect, but worth knowing before requiring a check. If GitHub cannot compute
+the merge ref, it runs no `pull_request` workflows — the required check is never
+reported, and the pull request sits waiting forever. "No checks reported" is not the
+same as "checks passed", and the fix is to rebase or recreate the branch, because a
+retarget alone does not re-run anything.
+
 ## The release train
 
 ```
