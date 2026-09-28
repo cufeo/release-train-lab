@@ -120,3 +120,5 @@ and no date; it can be deleted and recreated on different code leaving no trace,
 it sorts by commit date rather than tag date, which silently produces the wrong
 release order in any audit.
 
+
+<!-- A documentation-only change. It touches no application code. -->
